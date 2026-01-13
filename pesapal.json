@@ -1,0 +1,1 @@
+{"staff": {"columns": {"id": "int", "name": "str"}, "pk": "id", "rows": {"1": {"id": 1, "name": "Kenya"}}, "next_row_id": 2, "indexes": {"id": {"1": [1]}}, "unique": ["id"]}}
