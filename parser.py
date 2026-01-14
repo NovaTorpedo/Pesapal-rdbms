@@ -1,6 +1,6 @@
 import re
 import json
-from .core import Database, DBError
+from core import Database, DBError
 
 class SQLParser:
     def __init__(self, db: Database):

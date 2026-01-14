@@ -1,1 +1,1 @@
-{"staff": {"columns": {"id": "int", "name": "str"}, "pk": "id", "rows": {"1": {"id": 1, "name": "Kenya"}}, "next_row_id": 2, "indexes": {"id": {"1": [1]}}, "unique": ["id"]}}
+{"staff": {"columns": {"id": "int", "name": "str"}, "pk": "id", "rows": {"1": {"id": 1, "name": "Kenya"}}, "next_row_id": 2, "indexes": {"id": {"1": [1]}}, "unique": ["id"]}, "users": {"columns": {"id": "int", "full_name": "str", "email": "str)"}, "pk": null, "rows": {"1": {"id": 1, "full_name": "Alice", "email": "alice@example.com"}}, "next_row_id": 2, "indexes": {}, "unique": []}}
