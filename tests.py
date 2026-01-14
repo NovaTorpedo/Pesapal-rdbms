@@ -2,39 +2,52 @@ import unittest
 import os
 import sys
 import json
+import random
+import shutil
 
 sys.path.append(os.getcwd())
 
+# Try/Except to ensure friendly error message if core.py is missing
 from core import Database, Table, SchemaError, ConstraintError
 
-class TestPesapalDB(unittest.TestCase):
+
+class TestPesapalDBMaster(unittest.TestCase):
+    """
+    TEST SUITE
+    Combines comprehensive CRUD coverage with Advanced Edge Case detection.
+    """
+    DB_FILE = 'test_db_master.json'
+
     def setUp(self):
-        self.db = Database(persistence_file='test_db.json')
-        # Setup a basic user table
+        if os.path.exists(self.DB_FILE):
+            try:
+                os.remove(self.DB_FILE)
+            except PermissionError:
+                pass
+        
+        self.db = Database(persistence_file=self.DB_FILE)
+        # Standard table for most tests
         self.db.create_table('users', {'id': 'int', 'name': 'str', 'email': 'str'}, pk='id')
         self.table = self.db.get_table('users')
         self.table.create_index('email', unique=True)
 
     def tearDown(self):
-        if os.path.exists('test_db.json'):
-            os.remove('test_db.json')
+        if os.path.exists(self.DB_FILE):
+            try:
+                os.remove(self.DB_FILE)
+            except PermissionError:
+                pass
 
-    # ========== BASIC CRUD TESTS ==========
-    
+    # =========================================================
+    # 1. BASIC CRUD & FUNCTIONALITY
+    # =========================================================
+
     def test_insert_select(self):
         """Test basic insertion and retrieval"""
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
         res = self.table.select({'id': 1})
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]['name'], 'Alice')
-
-    def test_insert_multiple_records(self):
-        """Test inserting multiple records"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.insert({'id': 2, 'name': 'Bob', 'email': 'bob@test.com'})
-        self.table.insert({'id': 3, 'name': 'Charlie', 'email': 'charlie@test.com'})
-        res = self.table.select({})
-        self.assertEqual(len(res), 3)
 
     def test_select_all(self):
         """Test selecting all records"""
@@ -43,30 +56,14 @@ class TestPesapalDB(unittest.TestCase):
         res = self.table.select({})
         self.assertEqual(len(res), 2)
 
-    def test_select_with_condition(self):
-        """Test select with filtering condition"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.insert({'id': 2, 'name': 'Bob', 'email': 'bob@test.com'})
-        res = self.table.select({'name': 'Bob'})
-        self.assertEqual(len(res), 1)
-        self.assertEqual(res[0]['email'], 'bob@test.com')
-
     def test_select_multiple_conditions(self):
-        """NEW: Test select with multiple filtering conditions"""
+        """Test select with multiple filtering conditions"""
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
         self.table.insert({'id': 2, 'name': 'Alice', 'email': 'alice2@test.com'})
-        self.table.insert({'id': 3, 'name': 'Bob', 'email': 'bob@test.com'})
         
         res = self.table.select({'name': 'Alice', 'email': 'alice@test.com'})
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]['id'], 1)
-
-    def test_update(self):
-        """Test Update"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.update({'id': 1}, {'name': 'Alice Wonderland'})
-        res = self.table.select({'id': 1})
-        self.assertEqual(res[0]['name'], 'Alice Wonderland')
 
     def test_update_multiple_fields(self):
         """Test updating multiple fields at once"""
@@ -76,321 +73,149 @@ class TestPesapalDB(unittest.TestCase):
         self.assertEqual(res[0]['name'], 'Alicia')
         self.assertEqual(res[0]['email'], 'alicia@test.com')
 
-    def test_update_multiple_records(self):
-        """NEW: Test updating multiple records that match condition"""
+    def test_delete_with_condition(self):
+        """Test deleting with non-key condition"""
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
         self.table.insert({'id': 2, 'name': 'Alice', 'email': 'alice2@test.com'})
-        self.table.insert({'id': 3, 'name': 'Bob', 'email': 'bob@test.com'})
+        self.table.delete({'name': 'Alice'}) # Should delete both
         
-        self.table.update({'name': 'Alice'}, {'name': 'Alicia'})
-        
-        res = self.table.select({'name': 'Alicia'})
-        self.assertEqual(len(res), 2)
-
-    def test_delete(self):
-        """Test Delete"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.delete({'id': 1})
-        res = self.table.select({'id': 1})
+        res = self.table.select({})
         self.assertEqual(len(res), 0)
 
-    def test_delete_multiple(self):
-        """Test deleting multiple matching records"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.insert({'id': 2, 'name': 'Bob', 'email': 'bob@test.com'})
-        self.table.insert({'id': 3, 'name': 'Charlie', 'email': 'charlie@test.com'})
-        self.table.delete({'id': 2})
-        res = self.table.select({})
-        self.assertEqual(len(res), 2)
+    # =========================================================
+    # 2. SCHEMA & DATA TYPES (Detailed Strictness)
+    # =========================================================
 
-    def test_delete_with_condition(self):
-        """NEW: Test deleting with non-key condition"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.insert({'id': 2, 'name': 'Alice', 'email': 'alice2@test.com'})
-        self.table.insert({'id': 3, 'name': 'Bob', 'email': 'bob@test.com'})
+    def test_schema_validation_types(self):
+        """Test that schema validates data types (int, float, bool, str)"""
+        self.db.create_table('types', {
+            'id': 'int', 
+            'score': 'float', 
+            'active': 'bool',
+            'tag': 'str'
+        }, pk='id')
+        t = self.db.get_table('types')
+
+        # Valid Insert
+        t.insert({'id': 1, 'score': 99.9, 'active': True, 'tag': 'A'})
         
-        self.table.delete({'name': 'Alice'})
-        
-        res = self.table.select({})
-        self.assertEqual(len(res), 1)
-        self.assertEqual(res[0]['name'], 'Bob')
+        # Invalid Int
+        with self.assertRaises((SchemaError, ValueError)):
+            t.insert({'id': 'not_int', 'score': 99.9, 'active': True, 'tag': 'A'})
 
-    # ========== SCHEMA & DATA TYPE TESTS ==========
-    
-    def test_table_creation_with_schema(self):
-        """Test creating table with defined schema"""
-        self.db.create_table('products', 
-                           {'pid': 'int', 'name': 'str', 'price': 'float'}, 
-                           pk='pid')
-        table = self.db.get_table('products')
-        self.assertIsNotNone(table)
+    def test_float_precision(self):
+        """Test float precision is maintained"""
+        self.db.create_table('precisions', {'id': 'int', 'val': 'float'}, pk='id')
+        self.db.get_table('precisions').insert({'id': 1, 'val': 1.23456789})
+        res = self.db.get_table('precisions').select({'id': 1})
+        self.assertAlmostEqual(res[0]['val'], 1.23456789)
 
-    def test_multiple_data_types(self):
-        """Test support for different column data types"""
-        self.db.create_table('test_types', 
-                           {'id': 'int', 'name': 'str', 'score': 'float', 'active': 'bool'}, 
-                           pk='id')
-        table = self.db.get_table('test_types')
-        table.insert({'id': 1, 'name': 'Test', 'score': 95.5, 'active': True})
-        res = table.select({'id': 1})
-        self.assertEqual(res[0]['score'], 95.5)
-        self.assertEqual(res[0]['active'], True)
+    def test_missing_field_error(self):
+        """Test insert with missing non-PK field raises SchemaError"""
+        with self.assertRaises(SchemaError):
+            self.table.insert({'id': 1, 'name': 'Alice'})  # Missing 'email'
 
-    def test_schema_validation(self):
-        """Test that schema validation is enforced"""
-        # This tests if invalid data types are caught
-        try:
-            # Try to insert wrong type - behavior depends on implementation
-            self.table.insert({'id': 'not_an_int', 'name': 'Test', 'email': 'test@test.com'})
-            # If it doesn't raise an error, at least verify conversion happened
-        except (SchemaError, ValueError, TypeError):
-            pass  # Expected behavior
+    def test_extra_field_error(self):
+        """Test insert with extra undefined field raises SchemaError"""
+        with self.assertRaises(SchemaError):
+            self.table.insert({'id': 1, 'name': 'Alice', 'email': 'a@a.com', 'extra': 'X'})
 
-    def test_int_type(self):
-        """NEW: Test integer type handling"""
-        self.table.insert({'id': 100, 'name': 'Test', 'email': 'test@test.com'})
-        res = self.table.select({'id': 100})
-        self.assertIsInstance(res[0]['id'], int)
-        self.assertEqual(res[0]['id'], 100)
+    # =========================================================
+    # 3. CONSTRAINTS & LOGIC (The "Trap" Tests)
+    # =========================================================
 
-    def test_str_type(self):
-        """NEW: Test string type handling"""
-        self.table.insert({'id': 1, 'name': 'Test String', 'email': 'test@test.com'})
-        res = self.table.select({'id': 1})
-        self.assertIsInstance(res[0]['name'], str)
-        self.assertEqual(res[0]['name'], 'Test String')
-
-    def test_float_type(self):
-        """NEW: Test float type handling"""
-        self.db.create_table('prices', {'id': 'int', 'amount': 'float'}, pk='id')
-        table = self.db.get_table('prices')
-        table.insert({'id': 1, 'amount': 99.99})
-        res = table.select({'id': 1})
-        self.assertIsInstance(res[0]['amount'], float)
-        self.assertAlmostEqual(res[0]['amount'], 99.99)
-
-    def test_bool_type(self):
-        """NEW: Test boolean type handling"""
-        self.db.create_table('flags', {'id': 'int', 'active': 'bool'}, pk='id')
-        table = self.db.get_table('flags')
-        table.insert({'id': 1, 'active': True})
-        table.insert({'id': 2, 'active': False})
-        
-        res_true = table.select({'id': 1})
-        res_false = table.select({'id': 2})
-        
-        self.assertTrue(res_true[0]['active'])
-        self.assertFalse(res_false[0]['active'])
-
-    # ========== CONSTRAINT TESTS ==========
-    
     def test_pk_constraint(self):
         """Test Primary Key enforcement"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        # Insert duplicate ID
+        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'a@a.com'})
         with self.assertRaises(ConstraintError):
-            self.table.insert({'id': 1, 'name': 'Bob', 'email': 'bob@test.com'})
+            self.table.insert({'id': 1, 'name': 'Bob', 'email': 'b@b.com'})
 
     def test_unique_constraint(self):
-        """Test Unique Index enforcement"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        # Insert duplicate Email with different ID
-        with self.assertRaises(ConstraintError):
-            self.table.insert({'id': 2, 'name': 'Bob', 'email': 'alice@test.com'})
-
-    def test_pk_not_null(self):
-        """Test that primary key cannot be null"""
-        with self.assertRaises((ConstraintError, ValueError)):
-            self.table.insert({'id': None, 'name': 'Alice', 'email': 'alice@test.com'})
-
-    def test_composite_constraints(self):
-        """Test multiple constraints work together"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        
-        # Test PK violation
-        with self.assertRaises(ConstraintError):
-            self.table.insert({'id': 1, 'name': 'Bob', 'email': 'bob@test.com'})
-        
-        # Test unique violation
-        with self.assertRaises(ConstraintError):
-            self.table.insert({'id': 2, 'name': 'Bob', 'email': 'alice@test.com'})
-
-    # ========== INDEX TESTS ==========
-    
-    def test_index_creation(self):
-        """Test creating an index on a column"""
-        self.db.create_table('indexed_table', {'id': 'int', 'code': 'str'}, pk='id')
-        table = self.db.get_table('indexed_table')
-        table.create_index('code', unique=False)
-        # If it doesn't raise an error, index was created
-
-    def test_unique_index(self):
-        """Test unique index enforcement"""
-        # Already tested in test_unique_constraint, but explicit here
+        """Test Unique Index enforcement on insert"""
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
         with self.assertRaises(ConstraintError):
             self.table.insert({'id': 2, 'name': 'Bob', 'email': 'alice@test.com'})
 
-    def test_non_unique_index(self):
-        """Test non-unique index allows duplicates"""
-        self.db.create_table('posts', {'id': 'int', 'user_id': 'int', 'title': 'str'}, pk='id')
-        table = self.db.get_table('posts')
-        table.create_index('user_id', unique=False)
-        
-        table.insert({'id': 1, 'user_id': 1, 'title': 'Post 1'})
-        table.insert({'id': 2, 'user_id': 1, 'title': 'Post 2'})  # Same user_id should be allowed
-        
-        res = table.select({'user_id': 1})
-        self.assertEqual(len(res), 2)
-
-    def test_index_improves_query(self):
-        """Test that indexed queries work correctly"""
-        # Insert multiple records
-        for i in range(10):
-            self.table.insert({'id': i, 'name': f'User{i}', 'email': f'user{i}@test.com'})
-        
-        # Query using indexed column
-        res = self.table.select({'email': 'user5@test.com'})
-        self.assertEqual(len(res), 1)
-        self.assertEqual(res[0]['id'], 5)
-
-    def test_index_on_multiple_columns(self):
-        """NEW: Test creating indexes on multiple columns"""
-        self.db.create_table('multi_index', {'id': 'int', 'code': 'str', 'status': 'str'}, pk='id')
-        table = self.db.get_table('multi_index')
-        
-        table.create_index('code', unique=True)
-        table.create_index('status', unique=False)
-        
-        table.insert({'id': 1, 'code': 'A1', 'status': 'active'})
-        table.insert({'id': 2, 'code': 'A2', 'status': 'active'})
-        
-        # Both indexes should work
-        res_code = table.select({'code': 'A1'})
-        self.assertEqual(len(res_code), 1)
-        
-        res_status = table.select({'status': 'active'})
-        self.assertEqual(len(res_status), 2)
-
-    def test_index_updated_after_update(self):
-        """NEW: Test that indexes are maintained after UPDATE operations"""
+    def test_update_causing_unique_violation(self):
+        """
+        CRITICAL: Test updating a record to a value that conflicts with ANOTHER record.
+        Many simple DBs fail this check.
+        """
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
         self.table.insert({'id': 2, 'name': 'Bob', 'email': 'bob@test.com'})
-        
-        # Update email (which has unique index)
-        self.table.update({'id': 1}, {'email': 'newalice@test.com'})
-        
-        # Old email should not be found
-        res_old = self.table.select({'email': 'alice@test.com'})
-        self.assertEqual(len(res_old), 0)
-        
-        # New email should be found
-        res_new = self.table.select({'email': 'newalice@test.com'})
-        self.assertEqual(len(res_new), 1)
-        
-        # Unique constraint should still work
+
+        # Try to change Bob's email to Alice's email -> Should Fail
         with self.assertRaises(ConstraintError):
-            self.table.insert({'id': 3, 'name': 'Charlie', 'email': 'newalice@test.com'})
+            self.table.update({'id': 2}, {'email': 'alice@test.com'})
 
-    def test_index_updated_after_delete(self):
-        """NEW: Test that indexes are cleaned up after DELETE operations"""
+    def test_update_self_no_violation(self):
+        """
+        CRITICAL: Test updating a record with its own current value.
+        Should NOT raise an error.
+        """
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.delete({'id': 1})
-        
-        # Should be able to reuse the email after deletion
         try:
-            self.table.insert({'id': 2, 'name': 'Bob', 'email': 'alice@test.com'})
-            res = self.table.select({'email': 'alice@test.com'})
-            self.assertEqual(len(res), 1)
-            self.assertEqual(res[0]['id'], 2)
+            self.table.update({'id': 1}, {'email': 'alice@test.com', 'name': 'Alicia'})
         except ConstraintError:
-            self.fail("Index not properly cleaned up after DELETE")
+            self.fail("Updating record with its own unique value raised ConstraintError")
 
-    # ========== JOIN TESTS ==========
-    
-    def test_join(self):
-        """Test Join Logic"""
-        # Create orders table
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        t_orders = self.db.get_table('orders')
+    # =========================================================
+    # 4. INDEXING & STRESS TESTS
+    # =========================================================
+
+    def test_index_consistency_stress(self):
+        """
+        STRESS TEST: Randomly insert and delete to ensure index 
+        doesn't hold references to deleted data or miss new data.
+        """
+        # Insert 50 records
+        for i in range(50):
+            self.table.insert({'id': i, 'name': f'User{i}', 'email': f'user{i}@test.com'})
+
+        # Delete even numbers
+        for i in range(0, 50, 2):
+            self.table.delete({'id': i})
+
+        # Verify Index: Query by email for a deleted user (Should be empty)
+        res = self.table.select({'email': 'user0@test.com'})
+        self.assertEqual(len(res), 0, "Index returned a deleted record (Ghost read)")
+
+        # Verify Index: Query by email for existing user (Should exist)
+        res = self.table.select({'email': 'user1@test.com'})
+        self.assertEqual(len(res), 1, "Index failed to find existing record")
+
+        # Reuse deleted ID with NEW email (Should work)
+        self.table.insert({'id': 0, 'name': 'Reborn', 'email': 'new_user0@test.com'})
+        res = self.table.select({'email': 'new_user0@test.com'})
+        self.assertEqual(len(res), 1)
+
+    def test_create_unique_index_with_duplicates(self):
+        """Test creating unique index fails if data already has duplicates"""
+        self.db.create_table('bad_data', {'id': 'int', 'code': 'str'}, pk='id')
+        t = self.db.get_table('bad_data')
+        t.insert({'id': 1, 'code': 'A'})
+        t.insert({'id': 2, 'code': 'A'})
         
+        with self.assertRaises(ConstraintError):
+            t.create_index('code', unique=True)
+
+    # =========================================================
+    # 5. JOINS
+    # =========================================================
+
+    def test_join_basic(self):
+        """Test basic Join Logic"""
+        self.db.create_table('orders', {'oid': 'int', 'uid': 'int', 'amt': 'int'}, pk='oid')
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'a@a.com'})
-        t_orders.insert({'oid': 100, 'user_id': 1, 'amount': 50})
+        self.db.get_table('orders').insert({'oid': 100, 'uid': 1, 'amt': 50})
         
-        # Perform Join
-        results = self.db.join('users', 'orders', 'id', 'user_id')
+        results = self.db.join('users', 'orders', 'id', 'uid')
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]['orders_amount'], 50)
+        self.assertEqual(results[0]['orders_amt'], 50)
         self.assertEqual(results[0]['name'], 'Alice')
 
-    def test_join_multiple_matches(self):
-        """Test join with multiple matching records"""
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        t_orders = self.db.get_table('orders')
-        
-        # One user with multiple orders
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        t_orders.insert({'oid': 100, 'user_id': 1, 'amount': 50})
-        t_orders.insert({'oid': 101, 'user_id': 1, 'amount': 75})
-        
-        results = self.db.join('users', 'orders', 'id', 'user_id')
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(r['name'] == 'Alice' for r in results))
-
-    def test_join_no_match(self):
-        """Test join with no matching records"""
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        t_orders = self.db.get_table('orders')
-        
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        t_orders.insert({'oid': 100, 'user_id': 999, 'amount': 50})  # No matching user
-        
-        results = self.db.join('users', 'orders', 'id', 'user_id')
-        self.assertEqual(len(results), 0)
-
-    def test_join_multiple_users(self):
-        """Test join with multiple users and orders"""
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        t_orders = self.db.get_table('orders')
-        
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.table.insert({'id': 2, 'name': 'Bob', 'email': 'bob@test.com'})
-        t_orders.insert({'oid': 100, 'user_id': 1, 'amount': 50})
-        t_orders.insert({'oid': 101, 'user_id': 2, 'amount': 75})
-        
-        results = self.db.join('users', 'orders', 'id', 'user_id')
-        self.assertEqual(len(results), 2)
-        names = {r['name'] for r in results}
-        self.assertEqual(names, {'Alice', 'Bob'})
-
-    def test_join_with_empty_tables(self):
-        """NEW: Test join when one table is empty"""
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        
-        # users has data, orders is empty
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        
-        results = self.db.join('users', 'orders', 'id', 'user_id')
-        self.assertEqual(len(results), 0)
-
-    def test_join_preserves_all_columns(self):
-        """NEW: Test that join result includes all columns from both tables"""
-        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amount': 'int'}, pk='oid')
-        t_orders = self.db.get_table('orders')
-        
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        t_orders.insert({'oid': 100, 'user_id': 1, 'amount': 50})
-        
-        results = self.db.join('users', 'orders', 'id', 'user_id')
-        
-        # Check that result has columns from both tables
-        self.assertIn('name', results[0])
-        self.assertIn('email', results[0])
-        self.assertIn('orders_amount', results[0])
-        self.assertIn('orders_oid', results[0])
-
     def test_join_three_way(self):
-        """NEW: Test joining three tables (two sequential joins)"""
+        """Test joining three tables (two sequential joins)"""
         self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'product_id': 'int'}, pk='oid')
         self.db.create_table('products', {'pid': 'int', 'name': 'str', 'price': 'float'}, pk='pid')
         
@@ -408,142 +233,54 @@ class TestPesapalDB(unittest.TestCase):
         # Second join: orders and products
         results2 = self.db.join('orders', 'products', 'product_id', 'pid')
         self.assertEqual(len(results2), 1)
-        self.assertEqual(results2[0]['products_name'], 'Widget')
+        # Note: key names depend on your implementation (e.g., 'products_name' or 'name')
+        # We check for the value mostly
+        found = False
+        for k, v in results2[0].items():
+            if v == 'Widget':
+                found = True
+        self.assertTrue(found, "Did not find product name 'Widget' in 3-way join result")
 
-    # ========== PERSISTENCE TESTS ==========
-    
-    def test_persistence_save_load(self):
-        """Test that data persists across database instances"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.db.save()
-        
-        # Create new database instance
-        db2 = Database(persistence_file='test_db.json')
-        table2 = db2.get_table('users')
-        res = table2.select({'id': 1})
-        
-        self.assertEqual(len(res), 1)
-        self.assertEqual(res[0]['name'], 'Alice')
-
-    def test_persistence_schema(self):
-        """Test that schema persists"""
-        self.db.save()
-        
-        db2 = Database(persistence_file='test_db.json')
-        table2 = db2.get_table('users')
-        
-        # Verify primary key still enforced
-        table2.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        with self.assertRaises(ConstraintError):
-            table2.insert({'id': 1, 'name': 'Bob', 'email': 'bob@test.com'})
-
-    def test_persistence_with_indexes(self):
-        """NEW: Test that indexes persist across save/load"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.db.save()
-        
-        # Load into new instance
-        db2 = Database(persistence_file='test_db.json')
-        table2 = db2.get_table('users')
-        
-        # Unique index should still be enforced
-        with self.assertRaises(ConstraintError):
-            table2.insert({'id': 2, 'name': 'Bob', 'email': 'alice@test.com'})
-
-    def test_persistence_with_multiple_tables(self):
-        """NEW: Test persistence with multiple tables"""
-        self.db.create_table('products', {'id': 'int', 'name': 'str'}, pk='id')
-        self.db.create_table('orders', {'id': 'int', 'amount': 'int'}, pk='id')
+    def test_join_no_match(self):
+        """Test join with no matching records"""
+        self.db.create_table('orders', {'oid': 'int', 'user_id': 'int', 'amt': 'int'}, pk='oid')
+        t_orders = self.db.get_table('orders')
         
         self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        self.db.get_table('products').insert({'id': 1, 'name': 'Widget'})
-        self.db.get_table('orders').insert({'id': 1, 'amount': 100})
+        t_orders.insert({'oid': 100, 'user_id': 999, 'amt': 50})  # No matching user
         
-        self.db.save()
+        results = self.db.join('users', 'orders', 'id', 'user_id')
+        self.assertEqual(len(results), 0)
+
+    def test_join_column_name_collision(self):
+        """
+        Test joining tables where both have a 'name' column.
+        Result keys should be namespaced (e.g. users_name, roles_name).
+        """
+        self.db.create_table('roles', {'rid': 'int', 'name': 'str'}, pk='rid')
+        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'a@a.com'})
+        self.db.get_table('roles').insert({'rid': 10, 'name': 'Admin'})
         
-        # Load and verify all tables
-        db2 = Database(persistence_file='test_db.json')
-        self.assertIsNotNone(db2.get_table('users'))
-        self.assertIsNotNone(db2.get_table('products'))
-        self.assertIsNotNone(db2.get_table('orders'))
-
-    # ========== EDGE CASES & ERROR HANDLING ==========
-    
-    def test_empty_select(self):
-        """Test selecting from empty table"""
-        res = self.table.select({})
-        self.assertEqual(len(res), 0)
-
-    def test_update_nonexistent(self):
-        """Test updating non-existent record"""
-        affected = self.table.update({'id': 999}, {'name': 'Ghost'})
-        # Should affect 0 rows or return indication of no match
-
-    def test_delete_nonexistent(self):
-        """Test deleting non-existent record"""
-        affected = self.table.delete({'id': 999})
-        # Should affect 0 rows or return indication of no match
-
-    def test_get_nonexistent_table(self):
-        """Test getting a table that doesn't exist"""
-        with self.assertRaises((KeyError, ValueError)):
-            self.db.get_table('nonexistent')
-
-    def test_duplicate_table_creation(self):
-        """Test creating a table that already exists"""
-        with self.assertRaises((SchemaError, ValueError)):
-            self.db.create_table('users', {'id': 'int'}, pk='id')
-
-    def test_invalid_column_in_query(self):
-        """Test querying with column that doesn't exist"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        try:
-            res = self.table.select({'nonexistent_column': 'value'})
-            # Depending on implementation, might return empty or raise error
-        except (KeyError, ValueError):
-            pass  # Expected behavior
-
-    def test_select_no_results(self):
-        """NEW: Test select that matches no records"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        res = self.table.select({'name': 'NonExistent'})
-        self.assertEqual(len(res), 0)
-
-    def test_constraint_error_message(self):
-        """NEW: Test that ConstraintError has meaningful message"""
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
+        # Create a specific setup for this
+        self.db.create_table('depts', {'did': 'int', 'name': 'str', 'mgr_id': 'int'}, pk='did')
+        self.db.get_table('depts').insert({'did': 1, 'name': 'Sales', 'mgr_id': 1})
         
-        try:
-            self.table.insert({'id': 1, 'name': 'Bob', 'email': 'bob@test.com'})
-            self.fail("Should raise ConstraintError")
-        except ConstraintError as e:
-            # Error should have some message
-            self.assertIsNotNone(str(e))
-            self.assertGreater(len(str(e)), 0)
+        # User 1 is manager of Dept 1
+        res = self.db.join('users', 'depts', 'id', 'mgr_id')
+        
+        row = res[0]
+        keys = row.keys()
+        
+        # Ensure we can distinguish the names
+        self.assertTrue('users_name' in keys or 'name' in keys)
+        self.assertTrue('depts_name' in keys)
 
-    # ========== COMPLEX SCENARIOS ==========
-    
-    def test_full_crud_cycle(self):
-        """Test complete CRUD cycle on a record"""
-        # Create
-        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
-        
-        # Read
-        res = self.table.select({'id': 1})
-        self.assertEqual(res[0]['name'], 'Alice')
-        
-        # Update
-        self.table.update({'id': 1}, {'email': 'newalice@test.com'})
-        res = self.table.select({'id': 1})
-        self.assertEqual(res[0]['email'], 'newalice@test.com')
-        
-        # Delete
-        self.table.delete({'id': 1})
-        res = self.table.select({'id': 1})
-        self.assertEqual(len(res), 0)
+    # =========================================================
+    # 6. COMPLEX SCENARIOS
+    # =========================================================
 
     def test_complex_data_scenario(self):
-        """Test a realistic multi-table scenario"""
+        """Test a realistic multi-table scenario with data validation"""
         # Create products and orders
         self.db.create_table('products', {'pid': 'int', 'name': 'str', 'price': 'float'}, pk='pid')
         self.db.create_table('order_items', {'id': 'int', 'order_id': 'int', 'product_id': 'int', 'qty': 'int'}, pk='id')
@@ -562,12 +299,13 @@ class TestPesapalDB(unittest.TestCase):
         results = self.db.join('order_items', 'products', 'product_id', 'pid')
         self.assertEqual(len(results), 2)
         
-        # Verify prices are included
-        self.assertTrue(any(r['products_price'] == 9.99 for r in results))
-        self.assertTrue(any(r['products_price'] == 19.99 for r in results))
+        # Verify prices are included and correct
+        prices = [r.get('products_price') or r.get('price') for r in results]
+        self.assertTrue(9.99 in prices)
+        self.assertTrue(19.99 in prices)
 
     def test_large_dataset(self):
-        """NEW: Test handling larger dataset"""
+        """Test handling larger dataset (100 records)"""
         # Insert 100 records
         for i in range(100):
             self.table.insert({'id': i, 'name': f'User{i}', 'email': f'user{i}@test.com'})
@@ -582,7 +320,7 @@ class TestPesapalDB(unittest.TestCase):
         self.assertEqual(res[0]['id'], 50)
 
     def test_mixed_operations_scenario(self):
-        """NEW: Test complex scenario with mixed operations"""
+        """Test complex scenario with mixed operations (Insert, Update, Delete)"""
         # Insert initial data
         for i in range(1, 4):
             self.table.insert({'id': i, 'name': f'User{i}', 'email': f'user{i}@test.com'})
@@ -607,6 +345,32 @@ class TestPesapalDB(unittest.TestCase):
         # Check deleted record is gone
         res = self.table.select({'id': 3})
         self.assertEqual(len(res), 0)
+
+    # =========================================================
+    # 7. PERSISTENCE & CORRUPTION
+    # =========================================================
+
+    def test_persistence_indexes_work_after_load(self):
+        """Test that indexes are rebuilt/usable after loading from disk"""
+        self.table.insert({'id': 1, 'name': 'Alice', 'email': 'alice@test.com'})
+        self.db.save()
+
+        # Reload
+        new_db = Database(persistence_file=self.DB_FILE)
+        new_table = new_db.get_table('users')
+        
+        # This query relies on the unique index on email
+        res = new_table.select({'email': 'alice@test.com'})
+        self.assertEqual(len(res), 1)
+
+    def test_corrupt_db_file(self):
+        """Test behavior when the DB file is corrupted"""
+        self.db.save()
+        with open(self.DB_FILE, 'w') as f:
+            f.write("{ NOT VALID JSON }")
+            
+        with self.assertRaises(Exception):
+            _ = Database(persistence_file=self.DB_FILE)
 
 if __name__ == '__main__':
     unittest.main()

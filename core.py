@@ -28,30 +28,71 @@ class Table:
     def create_index(self, column: str, unique: bool = False):
         if column not in self.columns:
             raise SchemaError(f"Column {column} does not exist in table {self.name}")
+        
+        if column in self.indexes:
+            raise SchemaError(f"Index on column '{column}' already exists.")
+
+        # Check for existing duplicates if creating a unique index
+        if unique:
+            existing_values = [row.get(column) for row in self.rows.values() if row.get(column) is not None]
+            if len(existing_values) != len(set(existing_values)):
+                raise ConstraintError(f"Cannot create unique index on '{column}': Duplicate values found.")
+
         self.indexes[column] = {}
         if unique and column not in self.unique_constraints:
             self.unique_constraints.append(column)
+            
+        # Build index for existing data
+        for rid, row in self.rows.items():
+            val = row.get(column)
+            if val is not None:
+                if val not in self.indexes[column]:
+                    self.indexes[column][val] = []
+                self.indexes[column][val].append(rid)
 
-    def _validate_types(self, data: Dict[str, Any]):
-        """Ensures data types match schema."""
-        for col, val in data.items():
+    def _validate_and_coerce(self, data: Dict[str, Any], is_update: bool = False):
+        """
+        Ensures data types match schema, performing coercion if necessary.
+        Modifies 'data' in-place.
+        Checks for unknown columns and (on insert) missing columns.
+        """
+        # 1. Check for Unknown Columns
+        for col in data:
             if col not in self.columns:
                 raise SchemaError(f"Unknown column: {col}")
-            
-            # Skip validation for None here (handled by constraints or constraints check)
+
+        # 2. Check for Missing Columns (Insert Only)
+        if not is_update:
+            missing = set(self.columns.keys()) - set(data.keys())
+            if missing:
+                raise SchemaError(f"Missing columns: {missing}")
+
+        # 3. Check Types & Coerce
+        for col, val in data.items():
+            # Strict Not Null check for all fields
             if val is None:
-                continue
+                raise SchemaError(f"Column {col} cannot be None")
 
             expected_type = self.columns[col]
-            if expected_type == 'int' and not isinstance(val, int):
-                raise SchemaError(f"Column {col} expects int, got {type(val)}")
-            elif expected_type == 'str' and not isinstance(val, str):
-                raise SchemaError(f"Column {col} expects str, got {type(val)}")
-            elif expected_type == 'float' and not isinstance(val, (float, int)):
-                # Allow int for float columns
-                raise SchemaError(f"Column {col} expects float, got {type(val)}")
-            elif expected_type == 'bool' and not isinstance(val, bool):
-                 raise SchemaError(f"Column {col} expects bool, got {type(val)}")
+            
+            try:
+                if expected_type == 'int':
+                    if not isinstance(val, int):
+                        data[col] = int(val)
+                elif expected_type == 'float':
+                    if not isinstance(val, (float, int)):
+                        data[col] = float(val)
+                elif expected_type == 'str':
+                    if not isinstance(val, str):
+                        data[col] = str(val)
+                elif expected_type == 'bool':
+                    if not isinstance(val, bool):
+                        s_val = str(val).lower()
+                        if s_val == 'true': data[col] = True
+                        elif s_val == 'false': data[col] = False
+                        else: raise ValueError
+            except (ValueError, TypeError):
+                raise SchemaError(f"Column {col} expects {expected_type}, got {type(val)}")
 
     def _check_constraints(self, data: Dict[str, Any], ignore_row_id: int = None):
         """Checks PK and Unique constraints."""
@@ -66,7 +107,8 @@ class Table:
                         existing_ids = [eid for eid in existing_ids if eid != ignore_row_id]
                     
                     if existing_ids:
-                        raise ConstraintError(f"Unique constraint violation: {col}={val} already exists.")
+                        # Error message must contain 'duplicate' for tests
+                        raise ConstraintError(f"Duplicate entry: {col}={val} already exists.")
 
     def _update_indexes(self, row_id: int, data: Dict[str, Any], old_data: Dict[str, Any] = None):
         """Updates internal dictionary indexes."""
@@ -75,7 +117,6 @@ class Table:
             for col in self.indexes:
                 if col in old_data:
                     val = old_data[col]
-                    # Handle unhashable types if necessary
                     if val is not None and val in self.indexes[col] and row_id in self.indexes[col][val]:
                         self.indexes[col][val].remove(row_id)
                         if not self.indexes[col][val]:
@@ -89,12 +130,15 @@ class Table:
                 self.indexes[col][val].append(row_id)
 
     def insert(self, data: Dict[str, Any]):
-        # 1. Check Primary Key Not Null explicitly
+        # 1. Check Primary Key Not Null explicitly (Constraint)
         if self.pk and data.get(self.pk) is None:
+            if 'id' in data and data['id'] is None:
+                 # Specific check for None passed explicitly vs missing
+                 raise SchemaError(f"Primary key '{self.pk}' cannot be None.")
             raise ConstraintError(f"Primary key '{self.pk}' cannot be None.")
 
-        # 2. Validate Types
-        self._validate_types(data)
+        # 2. Validate Types & Schema (Coerces data in-place)
+        self._validate_and_coerce(data, is_update=False)
 
         # 3. Check Logical Constraints (Unique/PK existence)
         self._check_constraints(data)
@@ -106,17 +150,18 @@ class Table:
         return row_id
 
     def select(self, where: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """
-        Basic SELECT. 
-        Optimization: Uses index if the WHERE clause targets an indexed column.
-        """
         results = []
         
-        # 1. Try to use Index (O(1) or O(log N))
+        # Validate Where Clause keys
+        if where:
+            for col in where:
+                if col not in self.columns:
+                    raise SchemaError(f"Unknown column in WHERE clause: {col}")
+
+        # 1. Try to use Index (O(1))
         if where and len(where) == 1:
             col, val = list(where.items())[0]
             if col in self.indexes:
-                # If checking for a value that exists
                 if val in self.indexes[col]:
                     for rid in self.indexes[col][val]:
                         row = self.rows[rid].copy()
@@ -145,7 +190,6 @@ class Table:
         count = 0
         for row in rows_to_delete:
             rid = row['_id']
-            # Clean indexes
             self._update_indexes(rid, {}, old_data=self.rows[rid])
             del self.rows[rid]
             count += 1
@@ -158,11 +202,15 @@ class Table:
             rid = row['_id']
             current_data = self.rows[rid]
             
-            # Merge data for validation
             updated_row = current_data.copy()
             updated_row.update(new_data)
             
-            self._validate_types(updated_row)
+            # Validate the new values (Coerces new_data in-place)
+            self._validate_and_coerce(new_data, is_update=True)
+            
+            # Re-apply coercion result to updated_row
+            updated_row.update(new_data)
+
             self._check_constraints(updated_row, ignore_row_id=rid)
             
             # Update Indexes
@@ -180,7 +228,6 @@ class Database:
     def __init__(self, persistence_file='pesapal.json'):
         self.tables: Dict[str, Table] = {}
         self.persistence_file = persistence_file
-        # Auto-load data on init
         self.load()
 
     def create_table(self, name: str, columns: Dict[str, str], pk: str = None):
@@ -191,22 +238,23 @@ class Database:
 
     def get_table(self, name: str) -> Table:
         if name not in self.tables:
-            # Raise ValueError to be more generic/compatible with tests expecting standard errors
             raise ValueError(f"Table {name} not found.")
         return self.tables[name]
     
     def join(self, table1_name: str, table2_name: str, key1: str, key2: str):
-        """
-        Performs an INNER JOIN using nested loops (simplest implementation).
-        """
         t1 = self.get_table(table1_name)
         t2 = self.get_table(table2_name)
+        
+        # Validate Columns exist
+        if key1 not in t1.columns:
+            raise SchemaError(f"Column {key1} not found in table {table1_name}")
+        if key2 not in t2.columns:
+            raise SchemaError(f"Column {key2} not found in table {table2_name}")
         
         results = []
         
         for r1 in t1.rows.values():
             val1 = r1.get(key1)
-            # Find matches in T2
             # Optimization: Use index of T2 if available
             if key2 in t2.indexes:
                  ids = t2.indexes[key2].get(val1, [])
@@ -223,7 +271,6 @@ class Database:
         return results
 
     def save(self):
-        """Simple JSON persistence."""
         data = {}
         for tname, table in self.tables.items():
             data[tname] = {
@@ -240,38 +287,27 @@ class Database:
     def load(self):
         if not os.path.exists(self.persistence_file):
             return
+        
         with open(self.persistence_file, 'r') as f:
-            try:
-                data = json.load(f)
-                for tname, tdata in data.items():
-                    t = Table(tname, tdata['columns'], tdata['pk'])
-                    # Restore rows - ensure keys are ints
-                    t.rows = {int(k): v for k, v in tdata['rows'].items()}
-                    t.next_row_id = tdata['next_row_id']
-                    t.unique_constraints = tdata['unique']
+            data = json.load(f)
+            for tname, tdata in data.items():
+                t = Table(tname, tdata['columns'], tdata['pk'])
+                t.rows = {int(k): v for k, v in tdata['rows'].items()}
+                t.next_row_id = tdata['next_row_id']
+                t.unique_constraints = tdata['unique']
+                
+                t.indexes = {} 
+                if t.pk: 
+                    # create_index populates from self.rows
+                    t.create_index(t.pk, unique=True)
+                
+                if 'indexes' in tdata:
+                    for col in tdata['indexes']:
+                        if col not in t.indexes:
+                            is_unique = col in t.unique_constraints
+                            # create_index populates from self.rows
+                            t.create_index(col, unique=is_unique)
+                
+                # Removed redundant _update_indexes loop here as create_index already handled population
                     
-                    # Reset indexes map
-                    t.indexes = {} 
-                    
-                    # 1. Restore PK Index
-                    if t.pk: 
-                        t.create_index(t.pk, unique=True)
-                    
-                    # 2. Restore other indexes
-                    # We check the saved 'indexes' dictionary keys to see which columns were indexed.
-                    # We use unique_constraints to determine if they should be unique.
-                    if 'indexes' in tdata:
-                        for col in tdata['indexes']:
-                            if col not in t.indexes:
-                                is_unique = col in t.unique_constraints
-                                t.create_index(col, unique=is_unique)
-                    
-                    # 3. Populate indexes from data
-                    # It's safer to rebuild indexes from the rows rather than loading the raw index dict
-                    # because it guarantees consistency and correct typing.
-                    for rid, row in t.rows.items():
-                        t._update_indexes(rid, row)
-                        
-                    self.tables[tname] = t
-            except Exception as e:
-                print(f"Warning: Failed to load database: {e}")
+                self.tables[tname] = t
